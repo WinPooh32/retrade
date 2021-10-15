@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"retrade/platform"
 
 	"github.com/WinPooh32/fixed"
+	"github.com/WinPooh32/retrade/platform"
 )
 
 type IntervalLetter string

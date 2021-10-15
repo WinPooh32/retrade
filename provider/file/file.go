@@ -6,10 +6,9 @@ import (
 	"io"
 	"os"
 
-	"retrade/history"
-	"retrade/platform"
-
 	"github.com/WinPooh32/fixed"
+	"github.com/WinPooh32/retrade/history"
+	"github.com/WinPooh32/retrade/platform"
 )
 
 type File struct{ file *os.File }

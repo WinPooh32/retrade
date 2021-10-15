@@ -3,9 +3,9 @@ package binance
 import (
 	"context"
 	"fmt"
-	"retrade/platform"
 
 	"github.com/WinPooh32/fixed"
+	"github.com/WinPooh32/retrade/platform"
 	"github.com/adshao/go-binance/v2"
 )
 

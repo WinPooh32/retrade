@@ -1,4 +1,4 @@
-module retrade
+module github.com/WinPooh32/retrade
 
 go 1.17
 

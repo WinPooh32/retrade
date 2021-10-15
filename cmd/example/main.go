@@ -9,10 +9,10 @@ import (
 	"os/signal"
 	"time"
 
-	"retrade/candle"
-	"retrade/platform"
-	"retrade/provider/binance"
-	"retrade/provider/file"
+	"github.com/WinPooh32/retrade/candle"
+	"github.com/WinPooh32/retrade/platform"
+	"github.com/WinPooh32/retrade/provider/binance"
+	"github.com/WinPooh32/retrade/provider/file"
 )
 
 const intervalTicks = 30

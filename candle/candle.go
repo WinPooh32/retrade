@@ -1,11 +1,10 @@
 package candle
 
 import (
-	"retrade/platform"
-	"retrade/ring/ringfixed"
-	"retrade/ring/ringi64"
-
 	"github.com/WinPooh32/fixed"
+	"github.com/WinPooh32/retrade/platform"
+	"github.com/WinPooh32/retrade/ring/ringfixed"
+	"github.com/WinPooh32/retrade/ring/ringi64"
 )
 
 type Fixed = fixed.Fixed

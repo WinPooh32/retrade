@@ -3,6 +3,7 @@ package binance
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/WinPooh32/fixed"
 	"github.com/WinPooh32/retrade/platform"
@@ -12,10 +13,23 @@ import (
 var ErrClosed = fmt.Errorf("connection closed")
 
 type Binance struct {
+	once  sync.Once
+	stopC chan struct{}
+	doneC chan struct{}
+
+	client *binance.Client
 }
 
-func New() *Binance {
-	return &Binance{}
+func New(testnet bool, apiKey, secretKey string) *Binance {
+	binance.UseTestnet = testnet
+
+	var b = Binance{
+		client: binance.NewClient(apiKey, secretKey),
+	}
+
+	b.client.UserAgent = "retrade/1.0"
+
+	return &b
 }
 
 func (b *Binance) Subscribe(ctx context.Context, symbol string) <-chan platform.EventContainer {
@@ -40,7 +54,9 @@ func (b *Binance) Subscribe(ctx context.Context, symbol string) <-chan platform.
 		sink <- platform.MakeError(fmt.Errorf("go-binance: %w", err))
 	}
 
-	doneC, _, err := binance.WsAggTradeServe(symbol, wsAggTradeHandler, errHandler)
+	var err error
+
+	b.doneC, b.stopC, err = binance.WsAggTradeServe(symbol, wsAggTradeHandler, errHandler)
 	if err != nil {
 		sink <- platform.MakeError(fmt.Errorf("go-binance: %w", err))
 	}
@@ -50,13 +66,13 @@ func (b *Binance) Subscribe(ctx context.Context, symbol string) <-chan platform.
 			select {
 			case e := <-sink:
 				events <- e
-			case <-doneC:
+			case <-b.doneC:
 				events <- platform.MakeError(ErrClosed)
 				close(events)
 				return
 			case <-ctx.Done():
 				events <- platform.MakeError(ctx.Err())
-				<-doneC
+				<-b.doneC
 				close(events)
 				return
 			}
@@ -64,6 +80,33 @@ func (b *Binance) Subscribe(ctx context.Context, symbol string) <-chan platform.
 	}()
 
 	return events
+}
+
+func (b *Binance) Wallet(ctx context.Context) (wallet map[string]platform.Fixed, err error) {
+	res, err := b.client.NewGetAccountService().Do(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get account: %w", err)
+	}
+
+	wallet = make(map[string]fixed.Fixed, len(res.Balances))
+
+	for _, b := range res.Balances {
+		free, err := fixed.Parse(b.Free)
+		if err != nil {
+			return nil, fmt.Errorf("parse value=%s: %w", b.Free, err)
+		}
+		wallet[b.Asset] = free
+	}
+
+	return wallet, nil
+}
+
+func (b *Binance) Close() error {
+	b.once.Do(func() {
+		close(b.stopC)
+	})
+	<-b.doneC
+	return nil
 }
 
 func init() {

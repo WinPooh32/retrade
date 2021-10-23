@@ -148,7 +148,36 @@ func (b *Binance) OrderOCO(ctx context.Context, symbol string, side platform.Ord
 		return "", fmt.Errorf("post OCO order: %w", err)
 	}
 
-	return strconv.FormatInt(res.OrderListID, 10), nil
+	return strconv.FormatInt(res.Orders[0].OrderID, 10), nil
+}
+
+func (b *Binance) Cancel(ctx context.Context, symbol string, orderID string) (status string, err error) {
+	id, err := strconv.ParseInt(orderID, 10, 64)
+	if err != nil {
+		return "", fmt.Errorf("orderID=%s: parse int: %w", orderID, err)
+	}
+
+	req := b.client.NewCancelOrderService().
+		Symbol(symbol).
+		OrderID(id)
+
+	res, err := req.Do(ctx)
+	if err != nil {
+		return "", fmt.Errorf("cancel order=%s: %w", orderID, err)
+	}
+
+	return string(res.Status), nil
+}
+
+func (b *Binance) CancelAll(ctx context.Context, symbol string) (err error) {
+	req := b.client.NewCancelOpenOrdersService().
+		Symbol(symbol)
+
+	_, err = req.Do(ctx)
+	if err != nil {
+		return fmt.Errorf("cancel all orders: %w", err)
+	}
+	return nil
 }
 
 func (b *Binance) Close() error {

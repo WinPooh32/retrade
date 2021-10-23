@@ -48,14 +48,15 @@ func main() {
 
 func intervalFromLetter(period int, letter binance.IntervalLetter) (interval int64) {
 	const (
-		minute = 60 * 1000
+		second = 1000
+		minute = 60 * second
 		hour   = 60 * minute
 		day    = 24 * hour
 	)
 	var scale int64
 	switch letter {
 	case "s":
-		scale = 1
+		scale = second
 	case "m":
 		scale = minute
 	case "h":

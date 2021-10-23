@@ -14,7 +14,7 @@ type Spot interface {
 	Cancel(ctx context.Context, symbol string, orderID string) (err error)
 	CancelAll(ctx context.Context, symbol string) (err error)
 	QueryOrder(ctx context.Context) (err error)
-	ListOrders(ctx context.Context) (err error)
+	ListOrders(ctx context.Context, symbol string) (orders []Order, err error)
 }
 
 type Account interface {

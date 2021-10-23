@@ -180,6 +180,36 @@ func (b *Binance) CancelAll(ctx context.Context, symbol string) (err error) {
 	return nil
 }
 
+
+func (b *Binance) ListOrders(ctx context.Context, symbol string) (orders []platform.Order, err error) {
+	req := b.client.NewListOpenOrdersService().
+		Symbol(symbol)
+
+	res, err := req.Do(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list orders orders: %w", err)
+	}
+
+	orders = make([]platform.Order, 0, len(res))
+	for _, o := range res {
+		orders = append(orders, platform.Order{
+			Symbol:                   o.Symbol,
+			OrderID:                  strconv.FormatInt(o.OrderID, 10),
+			Price:                    o.Price,
+			OrigQuantity:             o.OrigQuantity,
+			ExecutedQuantity:         o.ExecutedQuantity,
+			CummulativeQuoteQuantity: o.CummulativeQuoteQuantity,
+			Status:                   string(o.Status),
+			Type:                     string(o.Type),
+			Side:                     string(o.Side),
+			StopPrice:                o.StopPrice,
+			Time:                     o.Time,
+		})
+	}
+
+	return orders, nil
+}
+
 func (b *Binance) Close() error {
 	b.once.Do(func() {
 		close(b.stopC)

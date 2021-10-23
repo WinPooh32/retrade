@@ -25,3 +25,10 @@ const (
 type Order struct {
 	Raw json.RawMessage
 }
+
+type OptionsOCO struct {
+	Price    Fixed
+	Stop     Fixed
+	Limit    Fixed
+	Quantity Fixed
+}

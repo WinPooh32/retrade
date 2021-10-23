@@ -3,6 +3,7 @@ package binance
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/WinPooh32/fixed"
@@ -99,6 +100,55 @@ func (b *Binance) Wallet(ctx context.Context) (wallet map[string]platform.Fixed,
 	}
 
 	return wallet, nil
+}
+
+func (b *Binance) OrderMarket(ctx context.Context, symbol string, side platform.OrderSide, quantity platform.Fixed) (orderID string, err error) {
+	req := b.client.NewCreateOrderService().
+		Symbol(symbol).
+		Type(binance.OrderTypeMarket)
+
+	switch side {
+	case platform.OrderSideBuy:
+		req.
+			Side(binance.SideTypeBuy).
+			QuoteOrderQty(quantity.String())
+
+	case platform.OrderSideSell:
+		req.
+			Side(binance.SideTypeSell).
+			Quantity(quantity.String())
+	}
+
+	res, err := req.Do(ctx)
+	if err != nil {
+		return "", fmt.Errorf("post market order: %w", err)
+	}
+
+	return strconv.FormatInt(res.OrderID, 10), nil
+}
+
+func (b *Binance) OrderOCO(ctx context.Context, symbol string, side platform.OrderSide, opt platform.OptionsOCO) (orderID string, err error) {
+	req := b.client.NewCreateOCOService().
+		Symbol(symbol).
+		Price(opt.Price.String()).
+		StopPrice(opt.Stop.String()).
+		StopLimitPrice(opt.Limit.String()).
+		StopLimitTimeInForce(binance.TimeInForceTypeGTC).
+		Quantity(opt.Quantity.String())
+
+	switch side {
+	case platform.OrderSideBuy:
+		req.Side(binance.SideTypeBuy)
+	case platform.OrderSideSell:
+		req.Side(binance.SideTypeSell)
+	}
+
+	res, err := req.Do(ctx)
+	if err != nil {
+		return "", fmt.Errorf("post OCO order: %w", err)
+	}
+
+	return strconv.FormatInt(res.OrderListID, 10), nil
 }
 
 func (b *Binance) Close() error {

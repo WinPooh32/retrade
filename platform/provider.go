@@ -9,7 +9,8 @@ import (
 type Fixed = fixed.Fixed
 
 type Spot interface {
-	Order(ctx context.Context, symbol string, side OrderSide, quantity Fixed) (orderID string, err error)
+	OrderMarket(ctx context.Context, symbol string, side OrderSide, quantity Fixed) (orderID string, err error)
+	OrderOCO(ctx context.Context, symbol string, side OrderSide, opt OptionsOCO) (orderID string, err error)
 	Cancel(ctx context.Context, orderID string) (err error)
 	CancelAll(ctx context.Context) (err error)
 	QueryOrder(ctx context.Context) (err error)

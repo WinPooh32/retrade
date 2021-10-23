@@ -159,7 +159,7 @@ reconnect:
 	for i := 0; i < 5; i++ {
 		fmt.Println("fetch binance.")
 
-		binance := binance.New()
+		binance := binance.New(false, "", "")
 		binanceEvents := binance.Subscribe(ctx, symbol)
 
 		for e := range binanceEvents {

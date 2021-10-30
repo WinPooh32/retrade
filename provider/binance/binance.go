@@ -180,6 +180,22 @@ func (b *Binance) CancelAll(ctx context.Context, symbol string) (err error) {
 	return nil
 }
 
+func (b *Binance) QueryOrder(ctx context.Context, symbol string, orderID string) (err error) {
+	orderIDInt64, err := strconv.ParseInt(orderID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parse orderID: parse int: %w", err)
+	}
+
+	req := b.client.NewGetOrderService().
+		Symbol(symbol).
+		OrderID(orderIDInt64)
+
+	_, err = req.Do(ctx)
+	if err != nil {
+		return fmt.Errorf("query order: %w", err)
+	}
+	return nil
+}
 
 func (b *Binance) ListOrders(ctx context.Context, symbol string) (orders []platform.Order, err error) {
 	req := b.client.NewListOpenOrdersService().

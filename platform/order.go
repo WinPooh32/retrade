@@ -1,7 +1,5 @@
 package platform
 
-import "encoding/json"
-
 type OrderSide string
 
 const (
@@ -23,7 +21,17 @@ const (
 )
 
 type Order struct {
-	Raw json.RawMessage
+	Symbol                   string
+	OrderID                  string
+	Price                    string
+	OrigQuantity             string
+	ExecutedQuantity         string
+	CummulativeQuoteQuantity string
+	Status                   string
+	Type                     string
+	Side                     string
+	StopPrice                string
+	Time                     int64
 }
 
 type OptionsOCO struct {

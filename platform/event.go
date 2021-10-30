@@ -6,6 +6,7 @@ const (
 	EventErr EventType = iota
 	EventCandle
 	EventTrade
+	EventBookTicker
 )
 
 type EventContainer struct {
@@ -15,8 +16,9 @@ type EventContainer struct {
 }
 
 type Event struct {
-	Trade  Trade
-	Candle Candle
+	Trade      Trade
+	Candle     Candle
+	BookTicker BookTicker
 }
 
 type Trade struct {
@@ -43,6 +45,14 @@ type Candle struct {
 	VolumeTakerBuyQuote Fixed
 }
 
+type BookTicker struct {
+	UpdateID     string
+	BestBidPrice Fixed
+	BestBidQty   Fixed
+	BestAskPrice Fixed
+	BestAskQty   Fixed
+}
+
 func MakeTrade(t Trade) EventContainer {
 	return EventContainer{
 		Type: EventTrade,
@@ -57,6 +67,15 @@ func MakeCandle(c Candle) EventContainer {
 		Type: EventCandle,
 		Event: Event{
 			Candle: c,
+		},
+	}
+}
+
+func MakeBookTicker(b BookTicker) EventContainer {
+	return EventContainer{
+		Type: EventBookTicker,
+		Event: Event{
+			BookTicker: b,
 		},
 	}
 }

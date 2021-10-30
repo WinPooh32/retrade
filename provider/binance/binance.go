@@ -13,15 +13,21 @@ import (
 
 var ErrClosed = fmt.Errorf("connection closed")
 
-type Binance struct {
-	once  sync.Once
+type control struct {
 	stopC chan struct{}
 	doneC chan struct{}
+}
+
+type Binance struct {
+	once sync.Once
+
+	trades control
+	books  control
 
 	client *binance.Client
 }
 
-func New(testnet bool, apiKey, secretKey string) *Binance {
+func New(testnet bool, apiKey, secretKey string) (*Binance, error) {
 	binance.UseTestnet = testnet
 
 	var b = Binance{
@@ -30,13 +36,48 @@ func New(testnet bool, apiKey, secretKey string) *Binance {
 
 	b.client.UserAgent = "retrade/1.0"
 
-	return &b
+	_, err := b.client.NewSetServerTimeService().Do(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("client: set server time: %w", err)
+	}
+
+	return &b, nil
 }
 
 func (b *Binance) Subscribe(ctx context.Context, symbol string) <-chan platform.EventContainer {
 	events := make(chan platform.EventContainer, 1024)
 
 	sink := make(chan platform.EventContainer, 1024)
+
+	go func() {
+		defer func() {
+			var err = b.Close()
+			if err != nil {
+				events <- platform.MakeError(fmt.Errorf("close: %w", err))
+			}
+			close(events)
+		}()
+
+		for {
+			select {
+			case e := <-sink:
+				events <- e
+			case <-b.books.doneC:
+				events <- platform.MakeError(ErrClosed)
+				return
+			case <-b.trades.doneC:
+				events <- platform.MakeError(ErrClosed)
+				return
+			case <-ctx.Done():
+				events <- platform.MakeError(ctx.Err())
+				return
+			}
+		}
+	}()
+
+	errHandler := func(err error) {
+		sink <- platform.MakeError(fmt.Errorf("go-binance: %w", err))
+	}
 
 	wsAggTradeHandler := func(event *binance.WsAggTradeEvent) {
 		t := platform.Trade{
@@ -51,34 +92,30 @@ func (b *Binance) Subscribe(ctx context.Context, symbol string) <-chan platform.
 		sink <- platform.MakeTrade(t)
 	}
 
-	errHandler := func(err error) {
-		sink <- platform.MakeError(fmt.Errorf("go-binance: %w", err))
+	wsBookTickerHandler := func(event *binance.WsBookTickerEvent) {
+		b := platform.BookTicker{
+			UpdateID:     strconv.FormatInt(event.UpdateID, 10),
+			BestBidPrice: fixed.NewS(event.BestBidPrice),
+			BestBidQty:   fixed.NewS(event.BestBidQty),
+			BestAskPrice: fixed.NewS(event.BestAskPrice),
+			BestAskQty:   fixed.NewS(event.BestAskQty),
+		}
+		sink <- platform.MakeBookTicker(b)
 	}
 
 	var err error
 
-	b.doneC, b.stopC, err = binance.WsAggTradeServe(symbol, wsAggTradeHandler, errHandler)
+	b.trades.doneC, b.trades.stopC, err = binance.WsAggTradeServe(symbol, wsAggTradeHandler, errHandler)
 	if err != nil {
 		sink <- platform.MakeError(fmt.Errorf("go-binance: %w", err))
+		return events
 	}
 
-	go func() {
-		for {
-			select {
-			case e := <-sink:
-				events <- e
-			case <-b.doneC:
-				events <- platform.MakeError(ErrClosed)
-				close(events)
-				return
-			case <-ctx.Done():
-				events <- platform.MakeError(ctx.Err())
-				<-b.doneC
-				close(events)
-				return
-			}
-		}
-	}()
+	b.books.doneC, b.books.stopC, err = binance.WsBookTickerServe(symbol, wsBookTickerHandler, errHandler)
+	if err != nil {
+		sink <- platform.MakeError(fmt.Errorf("go-binance: %w", err))
+		return events
+	}
 
 	return events
 }
@@ -228,9 +265,11 @@ func (b *Binance) ListOrders(ctx context.Context, symbol string) (orders []platf
 
 func (b *Binance) Close() error {
 	b.once.Do(func() {
-		close(b.stopC)
+		close(b.trades.stopC)
+		close(b.books.stopC)
 	})
-	<-b.doneC
+	<-b.trades.doneC
+	<-b.books.stopC
 	return nil
 }
 

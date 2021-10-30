@@ -136,7 +136,11 @@ reconnect:
 	for i := 0; i < 5; i++ {
 		fmt.Println("fetch binance.")
 
-		binance := binance.New(false, "", "")
+		binance, err := binance.New(false, "", "")
+		if err != nil {
+			return fmt.Errorf("binance: new instance: %w", err)
+		}
+
 		binanceEvents := binance.Subscribe(ctx, symbol)
 
 		for e := range binanceEvents {
@@ -161,6 +165,10 @@ reconnect:
 					time, open, high, low, close, volume := candles.Last()
 					fmt.Println("last filled candle:", time, open, high, low, close, volume)
 				}
+			case platform.EventBookTicker:
+				b := e.Event.BookTicker
+
+				fmt.Printf("%+v\n", b)
 			}
 			// Reset retry counter.
 			if i != 0 {

@@ -46,6 +46,7 @@ type Candle struct {
 }
 
 type BookTicker struct {
+	Time         int64
 	UpdateID     string
 	BestBidPrice Fixed
 	BestBidQty   Fixed

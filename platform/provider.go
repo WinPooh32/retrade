@@ -22,5 +22,5 @@ type Account interface {
 }
 
 type Public interface {
-	Subscribe(ctx context.Context, symbol string) (events chan<- EventContainer)
+	Subscribe(ctx context.Context, symbol string) (events <-chan EventContainer)
 }

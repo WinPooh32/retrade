@@ -4,8 +4,10 @@ go 1.17
 
 require (
 	github.com/WinPooh32/fixed v1.0.2
+	github.com/WinPooh32/fta v0.0.7
 	github.com/WinPooh32/gotemplate v0.1.0
-	github.com/adshao/go-binance/v2 v2.3.1
+	github.com/WinPooh32/series v0.0.8
+	github.com/adshao/go-binance/v2 v2.3.2
 	github.com/hashicorp/go-multierror v1.1.1
 )
 
@@ -15,6 +17,13 @@ require (
 )
 
 require (
-	github.com/hashicorp/errwrap v1.0.0 // indirect
-	github.com/stretchr/testify v1.2.2 // indirect
+	github.com/WinPooh32/math v1.0.5 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/hashicorp/errwrap v1.1.0 // indirect
+	github.com/klauspost/compress v1.13.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/stretchr/objx v0.1.0 // indirect
+	github.com/stretchr/testify v1.7.0 // indirect
+	gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c // indirect
+	nhooyr.io/websocket v1.8.7 // indirect
 )

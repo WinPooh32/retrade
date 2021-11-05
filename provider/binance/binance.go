@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/WinPooh32/fixed"
 	"github.com/WinPooh32/retrade/platform"
@@ -94,6 +95,7 @@ func (b *Binance) Subscribe(ctx context.Context, symbol string) <-chan platform.
 
 	wsBookTickerHandler := func(event *binance.WsBookTickerEvent) {
 		b := platform.BookTicker{
+			Time:         time.Now().UnixNano()/int64(time.Millisecond) - b.client.TimeOffset,
 			UpdateID:     strconv.FormatInt(event.UpdateID, 10),
 			BestBidPrice: fixed.NewS(event.BestBidPrice),
 			BestBidQty:   fixed.NewS(event.BestBidQty),

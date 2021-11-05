@@ -55,7 +55,7 @@ func (f File) Subscribe(ctx context.Context, symbol string) <-chan platform.Even
 			}
 			c := platform.MakeCandle(
 				platform.Candle{
-					Time:                t.Time,
+					Time:                t.Time * 1000,
 					Open:                t.Open,
 					High:                t.High,
 					Low:                 t.Low,

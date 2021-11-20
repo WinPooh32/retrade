@@ -10,10 +10,23 @@ import (
 	"github.com/WinPooh32/series"
 )
 
+type HistorySnaphsot struct {
+	Price candle.HistoryFloat32
+
+	BuyBestCount  candle.HistoryFloat32
+	SellBestCount candle.HistoryFloat32
+
+	BuyBestVolume  candle.HistoryFloat32
+	SellBestVolume candle.HistoryFloat32
+
+	BestAsk candle.HistoryFloat32
+	BestBid candle.HistoryFloat32
+}
+
 type Strategy interface {
 	Name() string
-	BuySignal(price, bestAsk, bestBid candle.HistoryFloat32) bool
-	SellSignal(price, bestAsk, bestBid candle.HistoryFloat32) bool
+	BuySignal(snap HistorySnaphsot) bool
+	SellSignal(snap HistorySnaphsot) bool
 }
 
 type Options struct {
@@ -43,18 +56,25 @@ type runstate struct {
 	account float32
 	pool    float32
 
-	price   *candle.Candle
+	price *candle.Candle
+
+	buyBestCount  *candle.Candle
+	sellBestCount *candle.Candle
+
+	buyBestVolume  *candle.Candle
+	sellBestVolume *candle.Candle
+
 	bestAsk *candle.Candle
 	bestBid *candle.Candle
 }
 
-func (state *runstate) doBuy(strategy Strategy, priceHistory, bestAskHistory, bestBidHistory candle.HistoryFloat32, opt Options) (buyTime int64, price float32, ok bool) {
+func (state *runstate) doBuy(strategy Strategy, snap HistorySnaphsot, opt Options) (buyTime int64, price float32, ok bool) {
 	var closePrice fixed.Fixed
 
 	buyTime, _, _, _, closePrice, _ = state.price.Last()
 	price = float32(closePrice.Float())
 
-	if strategy.BuySignal(priceHistory, bestAskHistory, bestBidHistory) {
+	if strategy.BuySignal(snap) {
 		state.account = state.buy(state.account, price, opt.FeeBuy)
 		state.side = sell
 
@@ -66,13 +86,13 @@ func (state *runstate) doBuy(strategy Strategy, priceHistory, bestAskHistory, be
 	return
 }
 
-func (state *runstate) doSell(strategy Strategy, priceHistory, bestAskHistory, bestBidHistory candle.HistoryFloat32, opt Options) (buyTime int64, price float32, account float32, ok bool) {
+func (state *runstate) doSell(strategy Strategy, snap HistorySnaphsot, opt Options) (buyTime int64, price float32, account float32, ok bool) {
 	var closePrice fixed.Fixed
 
 	buyTime, _, _, _, closePrice, _ = state.price.Last()
 	price = float32(closePrice.Float())
 
-	if strategy.SellSignal(priceHistory, bestAskHistory, bestBidHistory) {
+	if strategy.SellSignal(snap) {
 		state.account = state.sell(state.account, price, opt.FeeSell)
 		state.side = buy
 
@@ -119,7 +139,6 @@ func NewRunner() *Runner {
 }
 
 func (runner *Runner) Test(ctx context.Context, provider platform.Public, strategy Strategy, opt Options) (result Result, err error) {
-
 	var (
 		next         bool
 		finishedTick int64
@@ -130,9 +149,13 @@ func (runner *Runner) Test(ctx context.Context, provider platform.Public, strate
 			account: opt.Account,
 			pool:    0.0,
 
-			price:   candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
-			bestAsk: candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
-			bestBid: candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
+			price:          candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
+			buyBestCount:   candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
+			sellBestCount:  candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
+			buyBestVolume:  candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
+			sellBestVolume: candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
+			bestAsk:        candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
+			bestBid:        candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
 		}
 	)
 
@@ -158,6 +181,57 @@ func (runner *Runner) Test(ctx context.Context, provider platform.Public, strate
 		case platform.EventTrade:
 			t := event.Event.Trade
 			tick = t.Time / opt.FramePeriod
+
+			var (
+				tSellCount  platform.Trade
+				tSellVolume platform.Trade
+
+				tBuyCount  platform.Trade
+				tBuyVolume platform.Trade
+			)
+
+			if t.IsBuyerMaker {
+				// Solt by market.
+				tSellVolume = platform.Trade{
+					Time:     t.Time,
+					Quantity: t.Quantity,
+				}
+				tSellCount = platform.Trade{
+					Time:     t.Time,
+					Quantity: fixed.NewI(1, 0),
+				}
+
+				tBuyVolume = platform.Trade{
+					Time: t.Time,
+				}
+				tBuyCount = platform.Trade{
+					Time: t.Time,
+				}
+			} else {
+				// Buyed by market.
+				tSellVolume = platform.Trade{
+					Time: t.Time,
+				}
+				tSellCount = platform.Trade{
+					Time: t.Time,
+				}
+
+				tBuyVolume = platform.Trade{
+					Time:     t.Time,
+					Quantity: t.Quantity,
+				}
+				tBuyCount = platform.Trade{
+					Time:     t.Time,
+					Quantity: fixed.NewI(1, 0),
+				}
+			}
+
+			state.sellBestCount.Add(tSellCount)
+			state.sellBestVolume.Add(tSellVolume)
+
+			state.buyBestCount.Add(tBuyCount)
+			state.buyBestVolume.Add(tBuyVolume)
+
 			next = state.price.Add(t)
 
 		case platform.EventBookTicker:
@@ -180,21 +254,25 @@ func (runner *Runner) Test(ctx context.Context, provider platform.Public, strate
 		if next && tick > finishedTick {
 			finishedTick = tick
 
-			var (
-				priceHistory   = state.price.HistoryFloat32()
-				bestAskHistory = state.bestAsk.HistoryFloat32()
-				bestBidHistory = state.bestBid.HistoryFloat32()
-			)
+			var snap = HistorySnaphsot{
+				Price:          state.price.HistoryFloat32(),
+				BuyBestCount:   state.buyBestCount.HistoryFloat32(),
+				BuyBestVolume:  state.buyBestVolume.HistoryFloat32(),
+				SellBestCount:  state.sellBestCount.HistoryFloat32(),
+				SellBestVolume: state.sellBestVolume.HistoryFloat32(),
+				BestAsk:        state.bestAsk.HistoryFloat32(),
+				BestBid:        state.bestBid.HistoryFloat32(),
+			}
 
 			switch state.side {
 			case buy:
-				var ts, price, ok = state.doBuy(strategy, priceHistory, bestAskHistory, bestBidHistory, opt)
+				var ts, price, ok = state.doBuy(strategy, snap, opt)
 				if ok {
 					runner.buyTime = append(runner.buyTime, ts)
 					runner.buyPrice = append(runner.buyPrice, price)
 				}
 			case sell:
-				var ts, price, account, ok = state.doSell(strategy, priceHistory, bestAskHistory, bestBidHistory, opt)
+				var ts, price, account, ok = state.doSell(strategy, snap, opt)
 				if ok {
 					runner.sellTime = append(runner.sellTime, ts)
 					runner.sellPrice = append(runner.sellPrice, price)
@@ -205,13 +283,17 @@ func (runner *Runner) Test(ctx context.Context, provider platform.Public, strate
 	}
 
 	if state.side == sell {
-		var (
-			priceHistory   = state.price.HistoryFloat32()
-			bestAskHistory = state.bestAsk.HistoryFloat32()
-			bestBidHistory = state.bestBid.HistoryFloat32()
-		)
+		var snap = HistorySnaphsot{
+			Price:          state.price.HistoryFloat32(),
+			BuyBestCount:   state.buyBestCount.HistoryFloat32(),
+			BuyBestVolume:  state.buyBestVolume.HistoryFloat32(),
+			SellBestCount:  state.sellBestCount.HistoryFloat32(),
+			SellBestVolume: state.sellBestVolume.HistoryFloat32(),
+			BestAsk:        state.bestAsk.HistoryFloat32(),
+			BestBid:        state.bestBid.HistoryFloat32(),
+		}
 
-		var ts, price, account, ok = state.doSell(strategy, priceHistory, bestAskHistory, bestBidHistory, opt)
+		var ts, price, account, ok = state.doSell(strategy, snap, opt)
 		if ok {
 			runner.sellTime = append(runner.sellTime, ts)
 			runner.sellPrice = append(runner.sellPrice, price)

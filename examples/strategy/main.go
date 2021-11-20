@@ -45,13 +45,13 @@ func (ms *MacdStrategy) calc(price candle.HistoryFloat32, opt Options) (val, sig
 	return
 }
 
-func (ms *MacdStrategy) BuySignal(price, bestAsk, bestBid candle.HistoryFloat32) bool {
-	var val, sig = ms.calc(price, ms.OptBuy)
+func (ms *MacdStrategy) BuySignal(snap backtest.HistorySnaphsot) bool {
+	var val, sig = ms.calc(snap.Price, ms.OptBuy)
 	return val > sig
 }
 
-func (ms *MacdStrategy) SellSignal(price, bestAsk, bestBid candle.HistoryFloat32) bool {
-	var val, sig = ms.calc(price, ms.OptSell)
+func (ms *MacdStrategy) SellSignal(snap backtest.HistorySnaphsot) bool {
+	var val, sig = ms.calc(snap.Price, ms.OptSell)
 	return val < sig
 }
 

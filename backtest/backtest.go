@@ -3,10 +3,12 @@ package backtest
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/WinPooh32/fixed"
 	"github.com/WinPooh32/retrade/candle"
 	"github.com/WinPooh32/retrade/platform"
+	"github.com/WinPooh32/retrade/ring/ringmapf64"
 	"github.com/WinPooh32/series"
 )
 
@@ -21,6 +23,8 @@ type HistorySnaphsot struct {
 
 	BestAsk candle.HistoryFloat32
 	BestBid candle.HistoryFloat32
+
+	VolumeClusters []map[float64]float64
 }
 
 type Strategy interface {
@@ -66,6 +70,9 @@ type runstate struct {
 
 	bestAsk *candle.Candle
 	bestBid *candle.Candle
+
+	volumeClusters       ringmapf64.Ring
+	volumeClustersMoment map[float64]float64
 }
 
 func (state *runstate) doBuy(strategy Strategy, snap HistorySnaphsot, opt Options) (buyTime int64, price float32, ok bool) {
@@ -156,8 +163,13 @@ func (runner *Runner) Test(ctx context.Context, provider platform.Public, strate
 			sellBestVolume: candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
 			bestAsk:        candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
 			bestBid:        candle.NewCandle(opt.FramePeriod, int(opt.HistoryWindowSize)),
+
+			volumeClusters:       ringmapf64.MakeRing(int(opt.HistoryWindowSize)),
+			volumeClustersMoment: map[float64]float64{},
 		}
 	)
+
+	var clusters = make([]map[float64]float64, 0, int(opt.HistoryWindowSize))
 
 	for event := range provider.Subscribe(ctx, opt.Symbol) {
 		switch event.Type {
@@ -232,6 +244,12 @@ func (runner *Runner) Test(ctx context.Context, provider platform.Public, strate
 			state.buyBestCount.Add(tBuyCount)
 			state.buyBestVolume.Add(tBuyVolume)
 
+			const step = 1.0
+			price := t.Price.Float()
+			priceGroup := math.Floor(price/step) * step
+
+			state.volumeClustersMoment[float64(priceGroup)] += float64(t.Quantity.Float())
+
 			next = state.price.Add(t)
 
 		case platform.EventBookTicker:
@@ -254,6 +272,11 @@ func (runner *Runner) Test(ctx context.Context, provider platform.Public, strate
 		if next && tick > finishedTick {
 			finishedTick = tick
 
+			state.volumeClusters.ForcePushBack(state.volumeClustersMoment)
+			n := state.volumeClusters.CopyTo(clusters[:state.volumeClusters.Len()])
+
+			state.volumeClustersMoment = map[float64]float64{}
+
 			var snap = HistorySnaphsot{
 				Price:          state.price.HistoryFloat32(),
 				BuyBestCount:   state.buyBestCount.HistoryFloat32(),
@@ -262,6 +285,7 @@ func (runner *Runner) Test(ctx context.Context, provider platform.Public, strate
 				SellBestVolume: state.sellBestVolume.HistoryFloat32(),
 				BestAsk:        state.bestAsk.HistoryFloat32(),
 				BestBid:        state.bestBid.HistoryFloat32(),
+				VolumeClusters: clusters[:n],
 			}
 
 			switch state.side {
@@ -283,6 +307,11 @@ func (runner *Runner) Test(ctx context.Context, provider platform.Public, strate
 	}
 
 	if state.side == sell {
+		state.volumeClusters.ForcePushBack(state.volumeClustersMoment)
+		n := state.volumeClusters.CopyTo(clusters[:state.volumeClusters.Len()])
+
+		state.volumeClustersMoment = map[float64]float64{}
+
 		var snap = HistorySnaphsot{
 			Price:          state.price.HistoryFloat32(),
 			BuyBestCount:   state.buyBestCount.HistoryFloat32(),
@@ -291,6 +320,7 @@ func (runner *Runner) Test(ctx context.Context, provider platform.Public, strate
 			SellBestVolume: state.sellBestVolume.HistoryFloat32(),
 			BestAsk:        state.bestAsk.HistoryFloat32(),
 			BestBid:        state.bestBid.HistoryFloat32(),
+			VolumeClusters: clusters[:n],
 		}
 
 		var ts, price, account, ok = state.doSell(strategy, snap, opt)

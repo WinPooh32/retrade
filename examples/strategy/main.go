@@ -9,6 +9,7 @@ import (
 	"github.com/WinPooh32/fta"
 	"github.com/WinPooh32/retrade/backtest"
 	"github.com/WinPooh32/retrade/candle"
+	"github.com/WinPooh32/retrade/platform"
 	"github.com/WinPooh32/retrade/provider/binance"
 	"github.com/WinPooh32/series"
 )
@@ -55,6 +56,15 @@ func (ms *MacdStrategy) SellSignal(snap backtest.HistorySnaphsot) bool {
 	return val < sig
 }
 
+type Provider struct {
+	backtest.NopProvider
+	platform.Public
+}
+
+func (prov *Provider) Subscribe(ctx context.Context, symbol platform.Symbol) <-chan platform.EventContainer {
+	return prov.Public.Subscribe(ctx, symbol)
+}
+
 func main() {
 	const intervalTicks = 1
 	const intervalLetter = binance.IntervalDay
@@ -66,7 +76,9 @@ func main() {
 
 	var interval = binance.IntervalFromLetter(intervalTicks, intervalLetter)
 
-	var runner = backtest.NewRunner()
+	var publicProvider = binance.NewHistory(false, intervalTicks, intervalLetter)
+
+	var runner = backtest.NewRunner(&Provider{Public: publicProvider})
 
 	var optBuy = Options{
 		PeriodFast: 12,
@@ -88,9 +100,7 @@ func main() {
 		Limit:             1000.0,
 	}
 
-	provider := binance.NewHistory(false, intervalTicks, intervalLetter)
-
-	result, err := runner.Run(ctx, provider, &MacdStrategy{optBuy, optSell, 9}, opt)
+	result, err := runner.Run(ctx, &MacdStrategy{optBuy, optSell, 9}, opt)
 	if err != nil {
 		fmt.Printf("runner: method Test: %s\n", err)
 		return

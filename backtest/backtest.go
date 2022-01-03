@@ -34,7 +34,7 @@ type Strategy interface {
 }
 
 type Options struct {
-	Symbol            string
+	Symbol            platform.Symbol
 	FeeBuy            float32
 	FeeSell           float32
 	Account           float32
@@ -55,79 +55,19 @@ const (
 	sell = 1
 )
 
-type runstate struct {
-	side    int
-	account float32
-	pool    float32
-
-	price *candle.Candle
-
-	buyBestCount  *candle.Candle
-	sellBestCount *candle.Candle
-
-	buyBestVolume  *candle.Candle
-	sellBestVolume *candle.Candle
-
-	bestAsk *candle.Candle
-	bestBid *candle.Candle
-
-	volumeClusters       ringmapf64.Ring
-	volumeClustersMoment map[float64]float64
+type Provider interface {
+	platform.Public
+	platform.Spot
+	platform.Account
 }
 
-func (state *runstate) doBuy(strategy Strategy, snap HistorySnaphsot, opt Options) (buyTime int64, price float32, ok bool) {
-	var closePrice fixed.Fixed
-
-	buyTime, _, _, _, closePrice, _ = state.price.Last()
-	price = float32(closePrice.Float())
-
-	if strategy.BuySignal(snap) {
-		state.account = state.buy(state.account, price, opt.FeeBuy)
-		state.side = sell
-
-		ok = true
-		return
-	}
-
-	ok = false
-	return
+type eventHandler struct {
+	opt    Options
+	runner *Runner
+	state  runstate
 }
 
-func (state *runstate) doSell(strategy Strategy, snap HistorySnaphsot, opt Options) (buyTime int64, price float32, account float32, ok bool) {
-	var closePrice fixed.Fixed
-
-	buyTime, _, _, _, closePrice, _ = state.price.Last()
-	price = float32(closePrice.Float())
-
-	if strategy.SellSignal(snap) {
-		state.account = state.sell(state.account, price, opt.FeeSell)
-		state.side = buy
-
-		if opt.Limit != 0 && state.account > opt.Limit {
-			state.pool += state.account - opt.Limit
-			state.account = opt.Limit
-		}
-
-		account = state.account
-		ok = true
-		return
-	}
-
-	ok = false
-	return
-}
-
-func (*runstate) buy(account float32, price float32, fee float32) float32 {
-	fee = account * fee
-	return (account - fee) / price
-}
-
-func (*runstate) sell(account float32, price float32, fee float32) float32 {
-	fee = account * fee
-	return (account - fee) * price
-}
-
-type Runner struct {
+type stats struct {
 	buyTime   []int64
 	buyPrice  []float32
 	sellTime  []int64
@@ -135,23 +75,30 @@ type Runner struct {
 	account   []float32
 }
 
-func NewRunner() *Runner {
+type Runner struct {
+	provider Provider
+	stats    stats
+}
+
+func NewRunner(provider Provider) *Runner {
+	const defaultCap = 1024
 	return &Runner{
-		buyTime:   make([]int64, 0, 1024),
-		buyPrice:  make([]float32, 0, 1024),
-		sellTime:  make([]int64, 0, 1024),
-		sellPrice: make([]float32, 0, 1024),
-		account:   make([]float32, 0, 1024),
+		provider: provider,
+		stats: stats{
+			buyTime:   make([]int64, 0, defaultCap),
+			buyPrice:  make([]float32, 0, defaultCap),
+			sellTime:  make([]int64, 0, defaultCap),
+			sellPrice: make([]float32, 0, defaultCap),
+			account:   make([]float32, 0, defaultCap),
+		},
 	}
 }
 
-func (runner *Runner) Test(ctx context.Context, provider platform.Public, strategy Strategy, opt Options) (result Result, err error) {
-	var (
-		next         bool
-		finishedTick int64
-		tick         int64
-
-		state = runstate{
+func (runner *Runner) Run(ctx context.Context, strategy Strategy, opt Options) (result Result, err error) {
+	var handler = eventHandler{
+		opt:    opt,
+		runner: runner,
+		state: runstate{
 			side:    buy,
 			account: opt.Account,
 			pool:    0.0,
@@ -166,175 +113,188 @@ func (runner *Runner) Test(ctx context.Context, provider platform.Public, strate
 
 			volumeClusters:       ringmapf64.MakeRing(int(opt.HistoryWindowSize)),
 			volumeClustersMoment: map[float64]float64{},
-		}
-	)
 
-	var clusters = make([]map[float64]float64, 0, int(opt.HistoryWindowSize))
+			clusters: make([]map[float64]float64, 0, int(opt.HistoryWindowSize)),
+		},
+	}
 
-	for event := range provider.Subscribe(ctx, opt.Symbol) {
+	for event := range runner.provider.Subscribe(ctx, opt.Symbol) {
+		var err error
+
 		switch event.Type {
 		case platform.EventErr:
 			err = fmt.Errorf("provider: event: %w", event.Error)
-			return
 
 		case platform.EventCandle:
-			c := event.Event.Candle
-			state.price.AppendRaw(
-				c.Time,
-				c.Open,
-				c.High,
-				c.Low,
-				c.Close,
-				c.Volume,
-			)
-			tick = c.Time / opt.FramePeriod
-			next = true
+			if err = handler.onCandle(ctx, event.Event.Candle); err != nil {
+				err = fmt.Errorf("handler: on Candle event: %w", err)
+			}
 
 		case platform.EventTrade:
-			t := event.Event.Trade
-			tick = t.Time / opt.FramePeriod
-
-			var (
-				tSellCount  platform.Trade
-				tSellVolume platform.Trade
-
-				tBuyCount  platform.Trade
-				tBuyVolume platform.Trade
-			)
-
-			if t.IsBuyerMaker {
-				// Solt by market.
-				tSellVolume = platform.Trade{
-					Time:     t.Time,
-					Quantity: t.Quantity,
-				}
-				tSellCount = platform.Trade{
-					Time:     t.Time,
-					Quantity: fixed.NewI(1, 0),
-				}
-
-				tBuyVolume = platform.Trade{
-					Time: t.Time,
-				}
-				tBuyCount = platform.Trade{
-					Time: t.Time,
-				}
-			} else {
-				// Buyed by market.
-				tSellVolume = platform.Trade{
-					Time: t.Time,
-				}
-				tSellCount = platform.Trade{
-					Time: t.Time,
-				}
-
-				tBuyVolume = platform.Trade{
-					Time:     t.Time,
-					Quantity: t.Quantity,
-				}
-				tBuyCount = platform.Trade{
-					Time:     t.Time,
-					Quantity: fixed.NewI(1, 0),
-				}
+			if err = handler.onTrade(ctx, event.Event.Trade); err != nil {
+				err = fmt.Errorf("handler: on Trade event: %w", err)
 			}
-
-			state.sellBestCount.Add(tSellCount)
-			state.sellBestVolume.Add(tSellVolume)
-
-			state.buyBestCount.Add(tBuyCount)
-			state.buyBestVolume.Add(tBuyVolume)
-
-			const step = 1.0
-			price := t.Price.Float()
-			priceGroup := math.Floor(price/step) * step
-
-			state.volumeClustersMoment[float64(priceGroup)] += float64(t.Quantity.Float())
-
-			next = state.price.Add(t)
 
 		case platform.EventBookTicker:
-			b := event.Event.BookTicker
-			tick = b.Time / opt.FramePeriod
-
-			state.bestAsk.Add(platform.Trade{
-				Time:     b.Time,
-				Price:    b.BestAskPrice,
-				Quantity: b.BestAskQty,
-			})
-
-			next = state.bestBid.Add(platform.Trade{
-				Time:     b.Time,
-				Price:    b.BestBidPrice,
-				Quantity: b.BestBidQty,
-			})
+			if err = handler.onBookTicker(ctx, event.Event.BookTicker); err != nil {
+				err = fmt.Errorf("handler: on Book Ticker event: %w", err)
+			}
 		}
 
-		if next && tick > finishedTick {
-			finishedTick = tick
+		if err != nil {
+			return result, err
+		}
 
-			state.volumeClusters.ForcePushBack(state.volumeClustersMoment)
-			n := state.volumeClusters.CopyTo(clusters[:state.volumeClusters.Len()])
-
-			state.volumeClustersMoment = map[float64]float64{}
-
-			var snap = HistorySnaphsot{
-				Price:          state.price.HistoryFloat32(),
-				BuyBestCount:   state.buyBestCount.HistoryFloat32(),
-				BuyBestVolume:  state.buyBestVolume.HistoryFloat32(),
-				SellBestCount:  state.sellBestCount.HistoryFloat32(),
-				SellBestVolume: state.sellBestVolume.HistoryFloat32(),
-				BestAsk:        state.bestAsk.HistoryFloat32(),
-				BestBid:        state.bestBid.HistoryFloat32(),
-				VolumeClusters: clusters[:n],
-			}
-
-			switch state.side {
-			case buy:
-				var ts, price, ok = state.doBuy(strategy, snap, opt)
-				if ok {
-					runner.buyTime = append(runner.buyTime, ts)
-					runner.buyPrice = append(runner.buyPrice, price)
-				}
-			case sell:
-				var ts, price, account, ok = state.doSell(strategy, snap, opt)
-				if ok {
-					runner.sellTime = append(runner.sellTime, ts)
-					runner.sellPrice = append(runner.sellPrice, price)
-					runner.account = append(runner.account, account)
-				}
-			}
+		if state := &handler.state; state.next && state.tick > state.finishedTick {
+			runner.DoSideAction(state, strategy, opt)
 		}
 	}
 
-	if state.side == sell {
-		state.volumeClusters.ForcePushBack(state.volumeClustersMoment)
-		n := state.volumeClusters.CopyTo(clusters[:state.volumeClusters.Len()])
+	result = Result{
+		Buy:     series.MakeData(1, runner.stats.buyTime, runner.stats.buyPrice),
+		Sell:    series.MakeData(1, runner.stats.sellTime, runner.stats.sellPrice),
+		Account: series.MakeData(1, runner.stats.sellTime, runner.stats.account),
+		Pool:    handler.state.pool,
+	}
 
-		state.volumeClustersMoment = map[float64]float64{}
+	return result, nil
+}
 
-		var snap = HistorySnaphsot{
-			Price:          state.price.HistoryFloat32(),
-			BuyBestCount:   state.buyBestCount.HistoryFloat32(),
-			BuyBestVolume:  state.buyBestVolume.HistoryFloat32(),
-			SellBestCount:  state.sellBestCount.HistoryFloat32(),
-			SellBestVolume: state.sellBestVolume.HistoryFloat32(),
-			BestAsk:        state.bestAsk.HistoryFloat32(),
-			BestBid:        state.bestBid.HistoryFloat32(),
-			VolumeClusters: clusters[:n],
+func (runner *Runner) DoSideAction(state *runstate, strategy Strategy, opt Options) {
+	state.finishedTick = state.tick
+
+	state.volumeClusters.ForcePushBack(state.volumeClustersMoment)
+	n := state.volumeClusters.CopyTo(state.clusters[:state.volumeClusters.Len()])
+
+	state.volumeClustersMoment = map[float64]float64{}
+
+	var snap = HistorySnaphsot{
+		Price:          state.price.HistoryFloat32(),
+		BuyBestCount:   state.buyBestCount.HistoryFloat32(),
+		BuyBestVolume:  state.buyBestVolume.HistoryFloat32(),
+		SellBestCount:  state.sellBestCount.HistoryFloat32(),
+		SellBestVolume: state.sellBestVolume.HistoryFloat32(),
+		BestAsk:        state.bestAsk.HistoryFloat32(),
+		BestBid:        state.bestBid.HistoryFloat32(),
+		VolumeClusters: state.clusters[:n],
+	}
+
+	switch state.side {
+	case buy:
+		var ts, price, ok = state.doBuy(strategy, snap, opt)
+		if ok {
+			runner.stats.buyTime = append(runner.stats.buyTime, ts)
+			runner.stats.buyPrice = append(runner.stats.buyPrice, price)
 		}
-
+	case sell:
 		var ts, price, account, ok = state.doSell(strategy, snap, opt)
 		if ok {
-			runner.sellTime = append(runner.sellTime, ts)
-			runner.sellPrice = append(runner.sellPrice, price)
-			runner.account = append(runner.account, account)
+			runner.stats.sellTime = append(runner.stats.sellTime, ts)
+			runner.stats.sellPrice = append(runner.stats.sellPrice, price)
+			runner.stats.account = append(runner.stats.account, account)
+		}
+	}
+}
+
+func (handler *eventHandler) onCandle(ctx context.Context, candle platform.Candle) error {
+	state := &handler.state
+
+	state.price.AppendRaw(
+		candle.Time,
+		candle.Open,
+		candle.High,
+		candle.Low,
+		candle.Close,
+		candle.Volume,
+	)
+	state.tick = candle.Time / handler.opt.FramePeriod
+	state.next = true
+
+	return nil
+}
+
+func (handler *eventHandler) onTrade(ctx context.Context, trade platform.Trade) error {
+	state := &handler.state
+
+	state.tick = trade.Time / handler.opt.FramePeriod
+
+	var (
+		tSellCount  platform.Trade
+		tSellVolume platform.Trade
+
+		tBuyCount  platform.Trade
+		tBuyVolume platform.Trade
+	)
+
+	if trade.IsBuyerMaker {
+		// Solt by market.
+		tSellVolume = platform.Trade{
+			Time:     trade.Time,
+			Quantity: trade.Quantity,
+		}
+		tSellCount = platform.Trade{
+			Time:     trade.Time,
+			Quantity: fixed.NewI(1, 0),
+		}
+
+		tBuyVolume = platform.Trade{
+			Time: trade.Time,
+		}
+		tBuyCount = platform.Trade{
+			Time: trade.Time,
+		}
+	} else {
+		// Buyed by market.
+		tSellVolume = platform.Trade{
+			Time: trade.Time,
+		}
+		tSellCount = platform.Trade{
+			Time: trade.Time,
+		}
+
+		tBuyVolume = platform.Trade{
+			Time:     trade.Time,
+			Quantity: trade.Quantity,
+		}
+		tBuyCount = platform.Trade{
+			Time:     trade.Time,
+			Quantity: fixed.NewI(1, 0),
 		}
 	}
 
-	return Result{
-		Buy:     series.MakeData(1, runner.buyTime, runner.buyPrice),
-		Sell:    series.MakeData(1, runner.sellTime, runner.sellPrice),
-		Account: series.MakeData(1, runner.sellTime, runner.account),
-		Pool:    state.pool,
-	}, nil
+	state.sellBestCount.Add(tSellCount)
+	state.sellBestVolume.Add(tSellVolume)
+
+	state.buyBestCount.Add(tBuyCount)
+	state.buyBestVolume.Add(tBuyVolume)
+
+	const step = 1.0
+	price := trade.Price.Float()
+	priceGroup := math.Floor(price/step) * step
+
+	state.volumeClustersMoment[float64(priceGroup)] += float64(trade.Quantity.Float())
+
+	state.next = state.price.Add(trade)
+
+	return nil
+}
+
+func (handler *eventHandler) onBookTicker(ctx context.Context, bookticker platform.BookTicker) error {
+	state := &handler.state
+
+	state.tick = bookticker.Time / handler.opt.FramePeriod
+
+	state.bestAsk.Add(platform.Trade{
+		Time:     bookticker.Time,
+		Price:    bookticker.BestAskPrice,
+		Quantity: bookticker.BestAskQty,
+	})
+
+	state.next = state.bestBid.Add(platform.Trade{
+		Time:     bookticker.Time,
+		Price:    bookticker.BestBidPrice,
+		Quantity: bookticker.BestBidQty,
+	})
+
+	return nil
 }

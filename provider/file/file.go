@@ -25,7 +25,7 @@ func (f File) Close() error {
 	return f.file.Close()
 }
 
-func (f File) Subscribe(ctx context.Context, symbol string) <-chan platform.EventContainer {
+func (f File) Subscribe(ctx context.Context, symbol platform.Symbol) <-chan platform.EventContainer {
 	events := make(chan platform.EventContainer, 1024)
 
 	r, err := history.NewReader(f.file)

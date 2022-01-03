@@ -34,7 +34,7 @@ func NewHistory(testnet bool, inteval int, letter IntervalLetter) *BinanceHistor
 	}
 }
 
-func (bh *BinanceHistory) Subscribe(ctx context.Context, symbol string) <-chan platform.EventContainer {
+func (bh *BinanceHistory) Subscribe(ctx context.Context, symbol platform.Symbol) <-chan platform.EventContainer {
 	const (
 		Time                = 0
 		Open                = 1

@@ -25,7 +25,7 @@ type Trade struct {
 	TradeID      int64
 	Time         int64
 	Historic     bool
-	Symbol       string
+	Symbol       Symbol
 	Price        Fixed
 	Quantity     Fixed
 	IsBuyerMaker bool

@@ -90,7 +90,7 @@ func main() {
 
 	provider := binance.NewHistory(false, intervalTicks, intervalLetter)
 
-	result, err := runner.Test(ctx, provider, &MacdStrategy{optBuy, optSell, 9}, opt)
+	result, err := runner.Run(ctx, provider, &MacdStrategy{optBuy, optSell, 9}, opt)
 	if err != nil {
 		fmt.Printf("runner: method Test: %s\n", err)
 		return

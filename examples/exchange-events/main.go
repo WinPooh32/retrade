@@ -46,7 +46,7 @@ func main() {
 	fmt.Println("exit.")
 }
 
-func fetch(ctx context.Context, symbol string, window int, interval int64, candles *candle.Candle, offline bool) error {
+func fetch(ctx context.Context, symbol platform.Symbol, window int, interval int64, candles *candle.Candle, offline bool) error {
 	err := fetchHistoryFile(ctx, symbol, candles)
 	if err != nil {
 		return fmt.Errorf("fetch history file: %w", err)
@@ -67,10 +67,10 @@ func fetch(ctx context.Context, symbol string, window int, interval int64, candl
 	return nil
 }
 
-func fetchHistoryFile(ctx context.Context, symbol string, candles *candle.Candle) error {
+func fetchHistoryFile(ctx context.Context, symbol platform.Symbol, candles *candle.Candle) error {
 	fmt.Println("fetch file history.")
 
-	f, err := file.Open(symbol + ".csv")
+	f, err := file.Open(string(symbol) + ".csv")
 	if err != nil {
 		return fmt.Errorf("open history file: %w", err)
 	}
@@ -96,7 +96,7 @@ func fetchHistoryFile(ctx context.Context, symbol string, candles *candle.Candle
 	return nil
 }
 
-func fetchHistoryBinance(ctx context.Context, symbol string, window int, interval int64, candles *candle.Candle) error {
+func fetchHistoryBinance(ctx context.Context, symbol platform.Symbol, window int, interval int64, candles *candle.Candle) error {
 	fmt.Println("fetch binance history.")
 
 	binanceHistory := binance.NewHistory(false, intervalTicks, intervalLetter)
@@ -129,7 +129,7 @@ func fetchHistoryBinance(ctx context.Context, symbol string, window int, interva
 	return nil
 }
 
-func fetchBinance(ctx context.Context, symbol string, candles *candle.Candle) error {
+func fetchBinance(ctx context.Context, symbol platform.Symbol, candles *candle.Candle) error {
 	fmt.Println("fetch binance trades.")
 
 reconnect:

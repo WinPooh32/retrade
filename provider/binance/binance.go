@@ -45,7 +45,7 @@ func New(testnet bool, apiKey, secretKey string) (*Binance, error) {
 	return &b, nil
 }
 
-func (b *Binance) Subscribe(ctx context.Context, symbol string) <-chan platform.EventContainer {
+func (b *Binance) Subscribe(ctx context.Context, symbol platform.Symbol) <-chan platform.EventContainer {
 	events := make(chan platform.EventContainer, 1024)
 
 	sink := make(chan platform.EventContainer, 1024)
@@ -107,13 +107,13 @@ func (b *Binance) Subscribe(ctx context.Context, symbol string) <-chan platform.
 
 	var err error
 
-	b.trades.doneC, b.trades.stopC, err = binance.WsAggTradeServe(symbol, wsAggTradeHandler, errHandler)
+	b.trades.doneC, b.trades.stopC, err = binance.WsAggTradeServe(string(symbol), wsAggTradeHandler, errHandler)
 	if err != nil {
 		sink <- platform.MakeError(fmt.Errorf("go-binance: %w", err))
 		return events
 	}
 
-	b.books.doneC, b.books.stopC, err = binance.WsBookTickerServe(symbol, wsBookTickerHandler, errHandler)
+	b.books.doneC, b.books.stopC, err = binance.WsBookTickerServe(string(symbol), wsBookTickerHandler, errHandler)
 	if err != nil {
 		sink <- platform.MakeError(fmt.Errorf("go-binance: %w", err))
 		return events
@@ -141,9 +141,9 @@ func (b *Binance) Wallet(ctx context.Context) (wallet map[string]platform.Fixed,
 	return wallet, nil
 }
 
-func (b *Binance) OrderMarket(ctx context.Context, symbol string, side platform.OrderSide, quantity platform.Fixed) (orderID string, err error) {
+func (b *Binance) OrderMarket(ctx context.Context, symbol platform.Symbol, side platform.OrderSide, quantity platform.Fixed) (orderID string, err error) {
 	req := b.client.NewCreateOrderService().
-		Symbol(symbol).
+		Symbol(string(symbol)).
 		Type(binance.OrderTypeMarket)
 
 	switch side {
@@ -166,9 +166,9 @@ func (b *Binance) OrderMarket(ctx context.Context, symbol string, side platform.
 	return strconv.FormatInt(res.OrderID, 10), nil
 }
 
-func (b *Binance) OrderOCO(ctx context.Context, symbol string, side platform.OrderSide, opt platform.OptionsOCO) (orderID string, err error) {
+func (b *Binance) OrderOCO(ctx context.Context, symbol platform.Symbol, side platform.OrderSide, opt platform.OptionsOCO) (orderID string, err error) {
 	req := b.client.NewCreateOCOService().
-		Symbol(symbol).
+		Symbol(string(symbol)).
 		Price(opt.Price.String()).
 		StopPrice(opt.Stop.String()).
 		StopLimitPrice(opt.Limit.String()).
@@ -190,14 +190,14 @@ func (b *Binance) OrderOCO(ctx context.Context, symbol string, side platform.Ord
 	return strconv.FormatInt(res.Orders[0].OrderID, 10), nil
 }
 
-func (b *Binance) Cancel(ctx context.Context, symbol string, orderID string) (status string, err error) {
+func (b *Binance) Cancel(ctx context.Context, symbol platform.Symbol, orderID string) (status string, err error) {
 	id, err := strconv.ParseInt(orderID, 10, 64)
 	if err != nil {
 		return "", fmt.Errorf("orderID=%s: parse int: %w", orderID, err)
 	}
 
 	req := b.client.NewCancelOrderService().
-		Symbol(symbol).
+		Symbol(string(symbol)).
 		OrderID(id)
 
 	res, err := req.Do(ctx)
@@ -208,9 +208,9 @@ func (b *Binance) Cancel(ctx context.Context, symbol string, orderID string) (st
 	return string(res.Status), nil
 }
 
-func (b *Binance) CancelAll(ctx context.Context, symbol string) (err error) {
+func (b *Binance) CancelAll(ctx context.Context, symbol platform.Symbol) (err error) {
 	req := b.client.NewCancelOpenOrdersService().
-		Symbol(symbol)
+		Symbol(string(symbol))
 
 	_, err = req.Do(ctx)
 	if err != nil {
@@ -219,14 +219,14 @@ func (b *Binance) CancelAll(ctx context.Context, symbol string) (err error) {
 	return nil
 }
 
-func (b *Binance) QueryOrder(ctx context.Context, symbol string, orderID string) (err error) {
+func (b *Binance) QueryOrder(ctx context.Context, symbol platform.Symbol, orderID string) (err error) {
 	orderIDInt64, err := strconv.ParseInt(orderID, 10, 64)
 	if err != nil {
 		return fmt.Errorf("parse orderID: parse int: %w", err)
 	}
 
 	req := b.client.NewGetOrderService().
-		Symbol(symbol).
+		Symbol(string(symbol)).
 		OrderID(orderIDInt64)
 
 	_, err = req.Do(ctx)
@@ -236,9 +236,9 @@ func (b *Binance) QueryOrder(ctx context.Context, symbol string, orderID string)
 	return nil
 }
 
-func (b *Binance) ListOrders(ctx context.Context, symbol string) (orders []platform.Order, err error) {
+func (b *Binance) ListOrders(ctx context.Context, symbol platform.Symbol) (orders []platform.Order, err error) {
 	req := b.client.NewListOpenOrdersService().
-		Symbol(symbol)
+		Symbol(string(symbol))
 
 	res, err := req.Do(ctx)
 	if err != nil {
